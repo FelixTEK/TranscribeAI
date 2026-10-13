@@ -1,0 +1,21 @@
+TH {
+General Electric CM22-7i หรือ GEA เป็นรถจักรดีเซลไฟฟ้าของการรถไฟแห่งประเทศไทย ที่สั่งนำเข้ามาเพื่อใช้ในการทำขบวนรถโดยสารและขบวนรถสินค้า สั่งซื้อจากบริษัท General Electric Transportation รัฐเพนซิลเวเนีย สหรัฐอเมริกา เมื่อปี พ.ศ. 2538 จำนวนทั้งสิ้น 38 คัน
+}
+
+EN {
+All human beings are born free and equal in dignity and rights. They are endowed with reason and conscience and should act towards one another in a spirit of brotherhood.
+}
+
+ZH {
+请问你贵姓
+我姓张
+你叫什么名字
+我叫张东
+你是哪国人
+我是中国人你是哪国人
+我是美国人
+你学习什么
+我学习汉语
+汉语难吗
+汉字很难发音不太难
+}

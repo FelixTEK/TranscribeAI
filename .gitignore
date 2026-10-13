@@ -179,3 +179,11 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+# TranscribeAI local artifacts
+bin/
+models/
+data/
+.dl/
+*.m4a
+*.wav
+node_modules/

@@ -1,0 +1,12 @@
+{
+  "name": "transcribe-ai",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts"
+  },
+  "dependencies": {
+    "elysia": "^1.4.30"
+  }
+}

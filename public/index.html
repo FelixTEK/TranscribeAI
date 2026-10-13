@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TranscribeAI</title>
+<style>
+  :root { --bg:#fafaf9; --fg:#1c1917; --mut:#78716c; --card:#fff; --line:#e7e5e4; --acc:#2563eb; --warn:#b45309; --warnbg:#fef3c7; --bad:#b91c1c; --ok:#15803d; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#141413; --fg:#f5f5f4; --mut:#a8a29e; --card:#1c1b1a; --line:#2e2c2a; --acc:#60a5fa; --warn:#fbbf24; --warnbg:#3a2f0b; --bad:#f87171; --ok:#4ade80; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.55 system-ui,"Noto Sans Thai",sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.25rem; margin: 8px 0 16px; }
+  h2 { font-size: 1rem; margin: 20px 0 6px; }
+  button { font: inherit; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--acc); color: #fff; border-color: var(--acc); }
+  button.danger { color: var(--bad); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 8px 0; }
+  .row { display:flex; gap:8px; align-items:center; justify-content:space-between; }
+  .mut { color: var(--mut); font-size: .875rem; }
+  .kw { display:inline-block; font-size:.875rem; padding:2px 10px; margin:2px 6px 2px 0; border-radius:99px; border:1px solid var(--line); }
+  .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 8px; }
+  .bar > i { display:block; height:100%; background: var(--acc); transition: width .4s; }
+  .warn { background: var(--warnbg); color: var(--warn); border-radius: 10px; padding: 8px 12px; font-size: .875rem; margin: 12px 0; }
+  .item { padding: 8px 0; border-top: 1px solid var(--line); }
+  .item:first-of-type { border-top: 0; }
+  .item.unv { opacity: .75; }
+  .q { color: var(--mut); font-size: .875rem; }
+  .q[data-t] { cursor: pointer; }
+  .tag { font-size:.75rem; padding:1px 7px; border-radius:99px; border:1px solid var(--warn); color:var(--warn); margin-left:6px; }
+  a.back { color: var(--acc); text-decoration: none; cursor: pointer; }
+  .seg { padding: 3px 6px; border-radius: 6px; }
+  .seg.hl { background: var(--warnbg); }
+  .seg b { color: var(--mut); font-weight: 400; font-size: .8rem; margin-right: 6px; font-variant-numeric: tabular-nums; }
+  .st-done { color: var(--ok); } .st-failed { color: var(--bad); }
+  input[type=text] { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--fg); width: 100%; }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script>
+const $app = document.getElementById("app");
+let pw = ""; try { pw = localStorage.getItem("pw") || ""; } catch (e) {}
+const LABEL = { queued:"รอคิว", transcribing:"กำลังถอดเสียง", transcribed:"รอสรุป", summarizing:"กำลังสรุป", done:"เสร็จแล้ว", failed:"ล้มเหลว" };
+const seenAt = {};   // id+status -> first time seen (for elapsed time)
+let timer = null;
+
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const mmss = sec => String(Math.floor(sec/60)).padStart(2,"0") + ":" + String(Math.floor(sec%60)).padStart(2,"0");
+
+async function api(path, opts) {
+  opts = opts || {};
+  const r = await fetch("/api" + path, Object.assign({}, opts, { headers: Object.assign({}, opts.headers || {}, { "x-password": pw }) }));
+  if (r.status === 401) {
+    const p = prompt("ใส่รหัสผ่าน"); if (p == null) throw new Error("unauthorized");
+    pw = p; try { localStorage.setItem("pw", pw); } catch (e) {}
+    return api(path, opts);
+  }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+function progressText(r) {
+  const key = r.id + r.status;
+  if (!seenAt[key]) seenAt[key] = Date.now();
+  const elapsed = Math.round((Date.now() - seenAt[key]) / 1000);
+  switch (r.status) {
+    case "queued": return "รอคิว" + (r.queue_position ? " (ลำดับที่ " + r.queue_position + ")" : "");
+    case "transcribing": return "กำลังถอดเสียง " + r.progress + "%";
+    case "transcribed": return "ถอดเสียงแล้ว รอสรุป";
+    case "summarizing": return "กำลังสรุป… " + r.progress + "% · ผ่านไป " + mmss(elapsed);
+    case "failed": return "ล้มเหลว";
+    default: return LABEL[r.status] || r.status;
+  }
+}
+const busy = r => r.status !== "done" && r.status !== "failed";
+
+// ---- list view ----
+async function showList() {
+  clearTimeout(timer);
+  const rows = await api("/recordings");
+  $app.innerHTML =
+    '<h1>TranscribeAI</h1>' +
+    '<div class="card">' +
+      '<input type="text" id="title" placeholder="ชื่อ (ไม่ใส่ก็ได้)" style="margin-bottom:8px">' +
+      '<div class="row"><input type="file" id="file" accept="audio/*,.m4a,.mp3,.wav,.ogg,.flac,.aac"><button class="primary" id="up">อัปโหลด</button></div>' +
+      '<div class="mut" id="msg" style="margin-top:6px"></div>' +
+    '</div><div id="list"></div>';
+  document.getElementById("up").onclick = upload;
+  renderRows(rows);
+  if (rows.some(busy)) timer = setTimeout(refreshList, 2500);
+}
+async function refreshList() {
+  if (!document.getElementById("list")) return;
+  const rows = await api("/recordings").catch(() => null);
+  if (rows) { renderRows(rows); if (rows.some(busy)) timer = setTimeout(refreshList, 2500); }
+}
+function renderRows(rows) {
+  const el = document.getElementById("list"); if (!el) return;
+  el.innerHTML = rows.length ? rows.map(r =>
+    '<div class="card" data-id="' + r.id + '" style="cursor:pointer">' +
+      '<div class="row"><strong>' + esc(r.title) + '</strong><span class="mut st-' + r.status + '">' + esc(busy(r) ? progressText(r) : LABEL[r.status]) + '</span></div>' +
+      '<div class="mut">' + esc(r.created_at) + '</div>' +
+      (busy(r) ? '<div class="bar"><i style="width:' + r.progress + '%"></i></div>' : '') +
+      (r.error ? '<div class="mut st-failed">' + esc(r.error.slice(0, 200)) + '</div>' : '') +
+    '</div>').join("") : '<p class="mut">ยังไม่มีการบันทึก</p>';
+  el.querySelectorAll("[data-id]").forEach(c => c.onclick = () => { location.hash = "#/" + c.dataset.id; });
+}
+async function upload() {
+  const f = document.getElementById("file").files[0], msg = document.getElementById("msg");
+  if (!f) { msg.textContent = "เลือกไฟล์เสียงก่อน"; return; }
+  const fd = new FormData(); fd.append("file", f); fd.append("title", document.getElementById("title").value);
+  msg.textContent = "กำลังอัปโหลด…";
+  try { await api("/recordings", { method: "POST", body: fd }); showList(); }
+  catch (e) { msg.textContent = "อัปโหลดไม่สำเร็จ: " + e.message; }
+}
+
+// ---- detail view ----
+const GROUPS = [["details","รายละเอียดประกอบ"],["highlights","สิ่งที่น่าสนใจ"]];
+// summaries saved before the format change have no keywords field
+const LEGACY_GROUPS = [["requests","สิ่งที่ขอให้ทำ"],["questions","สิ่งที่ถาม (ต้องตอบ)"],["commitments","สิ่งที่รับปากไว้"],["details","รายละเอียด (นัดหมาย/เงิน/วันที่/ชื่อ)"]];
+
+async function showDetail(id) {
+  clearTimeout(timer);
+  const r = await api("/recordings/" + id).catch(() => null);
+  if (!r) { location.hash = "#/"; return; }
+  if (busy(r)) {
+    $app.innerHTML = '<a class="back" href="#/">← กลับ</a><h1>' + esc(r.title) + '</h1>' +
+      '<div class="card"><div>' + esc(progressText(r)) + '</div><div class="bar"><i style="width:' + r.progress + '%"></i></div>' +
+      '<div class="mut" style="margin-top:6px">ปิดหน้านี้ได้ ระบบทำงานต่อเบื้องหลัง</div></div>';
+    timer = setTimeout(() => showDetail(id), 2500);
+    return;
+  }
+  const segs = r.transcript || [];
+  let html = '<a class="back" href="#/">← กลับ</a><h1>' + esc(r.title) + '</h1><div class="mut">' + esc(r.created_at) + '</div>';
+  if (r.status === "failed") html += '<div class="warn">ล้มเหลว: ' + esc(r.error) + '</div>';
+  if (r.summary) {
+    html += '<div class="warn">ผลสรุปมาจาก AI อาจผิดพลาดได้ ตรวจซ้ำในเรื่องสำคัญ โดยเฉพาะตัวเลข วันที่ ชื่อ และจำนวนเงิน</div>' +
+      '<h2>ภาพรวม</h2><div class="card">' + esc(r.summary.overview) + '</div>';
+    if (r.summary.keywords) {
+      html += '<h2>Keywords</h2><div class="card">' + (r.summary.keywords.length
+        ? r.summary.keywords.map(k => '<span class="kw">' + esc(k) + '</span>').join("")
+        : '<span class="mut">ไม่มี</span>') + '</div>';
+    }
+    (r.summary.keywords ? GROUPS : LEGACY_GROUPS).forEach(g => {
+      const items = r.summary[g[0]] || [];
+      html += '<h2>' + g[1] + '</h2><div class="card">' + (items.length ? items.map(it => {
+        const jump = it.verified && it.time != null;
+        return '<div class="item ' + (it.verified ? '' : 'unv') + '">' +
+          '<div>' + esc(it.text) + (it.verified ? '' : '<span class="tag">ตรวจไม่พบในบทถอดเสียง</span>') + '</div>' +
+          '<div class="q"' + (jump ? ' data-t="' + it.time + '"' : '') + '>“' + esc(it.quote) + '”' + (jump ? ' · ' + mmss(it.time) : '') + '</div></div>';
+      }).join("") : '<span class="mut">ไม่มี</span>') + '</div>';
+    });
+  }
+  html += '<h2>บทถอดเสียง</h2><div class="card" id="tx">' +
+    segs.map((s, i) => '<div class="seg" id="seg' + i + '"><b>' + mmss(s.start) + '</b>' + esc(s.text) + '</div>').join("") +
+    '</div><p><button class="danger" id="del">ลบรายการนี้</button></p>';
+  $app.innerHTML = html;
+  $app.querySelectorAll("[data-t]").forEach(el => el.onclick = () => {
+    const t = Number(el.dataset.t);
+    let idx = 0; segs.forEach((s, i) => { if (s.start <= t) idx = i; });
+    document.querySelectorAll(".seg.hl").forEach(x => x.classList.remove("hl"));
+    const target = document.getElementById("seg" + idx); target.classList.add("hl"); target.scrollIntoView({ block: "center", behavior: "smooth" });
+  });
+  document.getElementById("del").onclick = async () => {
+    if (!confirm("ลบทั้ง transcript และสรุปของรายการนี้?")) return;
+    await api("/recordings/" + id, { method: "DELETE" }); location.hash = "#/";
+  };
+}
+
+function route() {
+  const m = location.hash.match(/^#\/(\d+)$/);
+  (m ? showDetail(Number(m[1])) : showList()).catch(e => { $app.innerHTML = '<p class="warn">' + esc(e.message) + '</p>'; });
+}
+addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>
