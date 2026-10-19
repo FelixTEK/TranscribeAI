@@ -64,9 +64,17 @@ const app = new Elysia()
   ;
 
 const maxRequestBodySize = MAX_BYTES + 1024 * 1024;
+let listening = 0;
 for (const hostname of HOSTS) {
-  Bun.serve({ port: PORT, hostname, maxRequestBodySize, fetch: app.fetch });
-  console.log(`TranscribeAI listening on http://${hostname}:${PORT}`);
+  try {
+    Bun.serve({ port: PORT, hostname, maxRequestBodySize, fetch: app.fetch });
+    console.log(`TranscribeAI listening on http://${hostname}:${PORT}`);
+    listening++;
+  } catch (e) {
+    // e.g. the Tailscale address while Tailscale is off: skip it instead of failing to start at all
+    console.warn(`cannot listen on ${hostname}:${PORT} (${e instanceof Error ? e.message : e}), skipping`);
+  }
 }
+if (!listening) throw new Error(`could not listen on any of: ${HOSTS.join(", ")}`);
 
 startWorker();
