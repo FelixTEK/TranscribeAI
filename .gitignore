@@ -187,3 +187,16 @@ data/
 *.m4a
 *.wav
 node_modules/
+*.7z
+docs/sheet/
+
+# working notes, not part of the submission
+docs/PLAN.md
+docs/canva-prompt.md
+docs/HANDOFF.md
+docs/experiment-results.md
+
+# summary evaluation did not finish (2 of 3 files failed); keep its outputs out until it is re-run
+eval/summary-results.md
+eval/summary-data.json
+eval/charts/summary_prf.png

@@ -1,7 +1,7 @@
 // Build the long test files from the 79 FLEURS utterances in data/eval/w16 (see docs/vad-test-plan.md, section 2).
 //   L1: random pauses 0.3-1.0 s + 6 traps (3 x digital silence, 3 x pink noise at ~-40 dBFS)
 //   L2: continuous speech, pauses 0.1-0.2 s, no traps
-// usage: bun data/eval/make_long.ts
+// usage: bun eval/make_long.ts [split]   (run from the repo root)
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -10,7 +10,14 @@ const evalDir = resolve("eval"); // scripts, refs, results (tracked)
 const out = `${dir}/long`;
 mkdirSync(out, { recursive: true });
 const refs: Record<string, string> = JSON.parse(await Bun.file(`${evalDir}/refs.json`).text());
-const names = readdirSync(`${dir}/w16`).filter((f) => f.endsWith(".wav")).map((f) => f.replace(".wav", "")).sort();
+const allNames = readdirSync(`${dir}/w16`).filter((f) => f.endsWith(".wav")).map((f) => f.replace(".wav", "")).sort();
+// `bun eval/make_long.ts`           -> L1 + L2 (all 79 utterances)
+// `bun eval/make_long.ts split`     -> LD (dev utterances) + LT (test utterances), from eval/split.json
+const splitMode = process.argv[2] === "split";
+const split: { dev: string[]; test: string[] } | undefined = splitMode
+  ? JSON.parse(await Bun.file(`${evalDir}/split.json`).text())
+  : undefined;
+let names = allNames;
 
 const SR = 16000;
 function rng(seed: number) {
@@ -44,10 +51,11 @@ function wavBytes(samples: Int16Array): Buffer {
 }
 
 const utter = new Map<string, Int16Array>();
-for (const n of names) utter.set(n, await pcm(["-i", `${dir}/w16/${n}.wav`]));
+for (const n of allNames) utter.set(n, await pcm(["-i", `${dir}/w16/${n}.wav`]));
 
 type Piece = { kind: "utterance" | "pause" | "silence-trap" | "noise-trap"; name?: string; samples: Int16Array };
-const traps: Record<number, { kind: "silence-trap" | "noise-trap"; seconds: number }> = {
+type Trap = { kind: "silence-trap" | "noise-trap"; seconds: number };
+const trapsL1: Record<number, Trap> = {
   9: { kind: "silence-trap", seconds: 25 },
   21: { kind: "noise-trap", seconds: 20 },
   33: { kind: "silence-trap", seconds: 30 },
@@ -55,17 +63,27 @@ const traps: Record<number, { kind: "silence-trap" | "noise-trap"; seconds: numb
   57: { kind: "silence-trap", seconds: 20 },
   69: { kind: "noise-trap", seconds: 20 },
 };
+// dev/test files have ~40 utterances, so three traps each (silence, noise, silence)
+const trapsSplit: Record<number, Trap> = {
+  9: { kind: "silence-trap", seconds: 25 },
+  19: { kind: "noise-trap", seconds: 20 },
+  29: { kind: "silence-trap", seconds: 30 },
+};
 
-async function build(label: "L1" | "L2") {
-  const r = rng(label === "L1" ? 1234 : 5678);
+type Label = "L1" | "L2" | "LD" | "LT";
+async function build(label: Label) {
+  names = label === "LD" ? split!.dev : label === "LT" ? split!.test : allNames;
+  const seeds = { L1: 1234, L2: 5678, LD: 4321, LT: 8765 };
+  const r = rng(seeds[label]);
+  const traps = label === "L1" ? trapsL1 : trapsSplit;
   const pieces: Piece[] = [];
   for (let i = 0; i < names.length; i++) {
     pieces.push({ kind: "utterance", name: names[i], samples: utter.get(names[i])! });
     if (i === names.length - 1) break;
-    const lo = label === "L1" ? 0.3 : 0.1;
-    const hi = label === "L1" ? 1.0 : 0.2;
+    const lo = label === "L2" ? 0.1 : 0.3;
+    const hi = label === "L2" ? 0.2 : 1.0;
     pieces.push({ kind: "pause", samples: new Int16Array(Math.round((lo + r() * (hi - lo)) * SR)) });
-    const trap = label === "L1" ? traps[i] : undefined;
+    const trap = label === "L2" ? undefined : traps[i];
     if (trap) {
       const samples =
         trap.kind === "silence-trap"
@@ -92,5 +110,10 @@ async function build(label: "L1" | "L2") {
   console.log(`${label}: ${(total / SR / 60).toFixed(2)} min, ${utts.length} utterances, ${timeline.length - utts.length} traps`,
     timeline.filter((t) => t.kind.endsWith("trap")).map((t) => `${t.kind.split("-")[0]}@${t.start.toFixed(0)}s(${(t.end - t.start).toFixed(0)}s${t.rmsDbfs ? `, ${t.rmsDbfs}dBFS` : ""})`).join(" "));
 }
-await build("L1");
-await build("L2");
+if (splitMode) {
+  await build("LD");
+  await build("LT");
+} else {
+  await build("L1");
+  await build("L2");
+}

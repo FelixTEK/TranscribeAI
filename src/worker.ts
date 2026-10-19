@@ -11,6 +11,7 @@ import {
   chunkSegments,
   dedupe,
   cleanSegments,
+  dropTailHallucinations,
   overviewSchema,
   verify,
   type Item,
@@ -113,7 +114,7 @@ async function transcribe(id: number) {
       raw = parseWhisperJson(await Bun.file(`${base}.json`).arrayBuffer(), 0);
     }
 
-    const segments = cleanSegments(raw);
+    const segments = dropTailHallucinations(cleanSegments(raw));
     update(id, { status: "transcribed", progress: 0, transcript: JSON.stringify(segments) });
   } finally {
     // the audio is never kept longer than needed

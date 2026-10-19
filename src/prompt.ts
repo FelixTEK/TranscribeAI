@@ -51,6 +51,28 @@ export function cleanSegments(segments: Segment[]): Segment[] {
   return out;
 }
 
+/** Sign-off phrases Whisper tends to invent at the end of a recording (learnt from subtitles of online videos). */
+const TAIL_HALLUCINATIONS = [
+  "感谢观看", "谢谢观看", "謝謝觀看", "请订阅", "ขอบคุณที่รับชม", "ขอบคุณที่ติดตามชม", "ขอบคุณที่รับชมครับ",
+  "thanksforwatching", "thankyouforwatching", "pleasesubscribe", "subtitlesbytheamaraorgcommunity",
+];
+
+/**
+ * Remove trailing segments that consist only of a known sign-off phrase. Only the end of the transcript is touched,
+ * and a phrase that is part of a longer sentence is kept. Deliberately separate from cleanSegments so that the
+ * evaluation scripts keep measuring raw model output.
+ */
+export function dropTailHallucinations(segments: Segment[]): Segment[] {
+  const out = [...segments];
+  const letters = (t: string) => t.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
+  while (out.length) {
+    const t = letters(out[out.length - 1].text);
+    if (t && !TAIL_HALLUCINATIONS.some((p) => t === p)) break;
+    out.pop();
+  }
+  return out;
+}
+
 export const fmtTime = (sec: number) => {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
@@ -157,7 +179,7 @@ function norm(s: string): string {
  * to the start of the segment where it was found. Quotes that are not found exactly
  * are accepted only if most of their 4-char shingles appear in the transcript.
  */
-export function verify(items: Item[], segments: Segment[]): Item[] {
+export function verify(items: Item[], segments: Segment[], threshold = 0.85): Item[] {
   let full = "";
   const owner: number[] = []; // normalized char index -> segment index
   segments.forEach((s, i) => {
@@ -175,7 +197,7 @@ export function verify(items: Item[], segments: Segment[]): Item[] {
     let hit = 0;
     const total = q.length - 3;
     for (let i = 0; i < total; i++) if (full.includes(q.slice(i, i + 4))) hit++;
-    const verified = hit / total >= 0.85;
+    const verified = hit / total >= threshold;
     return { ...it, verified };
   });
 }
