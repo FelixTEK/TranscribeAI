@@ -195,6 +195,7 @@ docs/PLAN.md
 docs/canva-prompt.md
 docs/HANDOFF.md
 docs/experiment-results.md
+docs/presentation-script.md
 
 # summary evaluation did not finish (2 of 3 files failed); keep its outputs out until it is re-run
 eval/summary-results.md
